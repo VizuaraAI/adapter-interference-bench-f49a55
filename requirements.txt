@@ -1,0 +1,27 @@
+# Core: needed for the simulator path and the metric/sweep machinery.
+# These are enough to run `python -m src.measure --simulate`.
+numpy>=1.26,<3.0
+pyyaml>=6.0.1
+pandas>=2.2.0
+tabulate>=0.9.0
+matplotlib>=3.8.0
+
+# Training the adapter zoo on the shared frozen base.
+torch>=2.4.0
+transformers>=4.45.0
+peft>=0.13.0
+datasets>=3.0.0
+accelerate>=1.0.0
+bitsandbytes>=0.44.0          # 8-bit and 4-bit adapter quantisation fallbacks
+sentencepiece>=0.2.0
+
+# Real serving measurements (multi-LoRA). Linux + CUDA only.
+# If this fails to install on your machine, the simulator path still works:
+#   pip install -r requirements.txt --no-deps vllm   is NOT recommended;
+#   instead install vllm separately once you have a CUDA GPU available.
+vllm>=0.6.2
+
+# Evaluation metrics for the per-task scores.
+evaluate>=0.4.3
+rouge-score>=0.1.2
+scipy>=1.14.0

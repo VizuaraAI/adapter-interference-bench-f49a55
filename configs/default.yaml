@@ -1,0 +1,100 @@
+# Single source of truth for every experiment knob.
+# No magic numbers in src/. If you need a new knob, add it here with a comment.
+
+run:
+  seed: 1234
+  out_dir: results
+  artifacts_dir: artifacts
+
+base_model:
+  # Primary base. The replication bases are run by overriding this field.
+  name: Qwen/Qwen2.5-1.5B-Instruct
+  dtype: bfloat16
+  max_model_len: 2048
+  # Replication bases. Only claim findings that hold on all three.
+  replication:
+    - HuggingFaceTB/SmolLM2-1.7B-Instruct
+    - meta-llama/Llama-3.2-1B-Instruct
+
+zoo:
+  # Start at 4 while you are debugging the pipeline, then raise to 32.
+  num_adapters: 32
+  # Ranks are drawn round-robin from this list when rank_mixture is
+  # heterogeneous. Rank heterogeneity is a controlled factor, not an accident.
+  ranks: [4, 8, 16, 32]
+  rank_mixture: heterogeneous      # heterogeneous | homogeneous
+  homogeneous_rank: 8
+  lora_alpha_ratio: 2.0            # lora_alpha = ratio * r
+  lora_dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj]
+  # Four task families, adapters split evenly across them.
+  task_families:
+    - name: reasoning
+      datasets: [gsm8k]
+      metric: exact_match
+    - name: code_sql
+      datasets: [mbpp, spider]
+      metric: pass_at_1
+    - name: domain_qa
+      datasets: [pubmed_qa, case_hold]
+      metric: accuracy
+    - name: summarisation
+      datasets: [samsum]
+      metric: rouge_l
+
+train:
+  max_train_samples: 2000          # drop to 500 for a fast first pass
+  max_eval_samples: 200
+  epochs: 2
+  batch_size: 4
+  grad_accum: 4
+  learning_rate: 2.0e-4
+  warmup_ratio: 0.03
+  max_seq_len: 1024
+
+sweep:
+  # Number of distinct adapters in the active working set. 1 is the solo
+  # reference that every IDS is computed against.
+  concurrency: [1, 2, 4, 8, 16, 32]
+  # Adapter cache size as a FRACTION of the working set's total adapter
+  # bytes. Relative, so results transfer across GPUs.
+  budget: [1.0, 0.5, 0.25, 0.12]
+  load_skew: [uniform, zipf]
+  zipf_alpha: 1.1
+  # One fallback enabled at a time, so each one's accuracy cost is
+  # separately attributable to it.
+  fallback: [none, quantise_8bit, quantise_4bit, truncate_rank, grouped_merge]
+  grouped_merge_k: 4               # merge the k hottest adapters into the base
+  truncate_rank_to: 4
+
+policy:
+  name: interference_aware         # see src/policies.py for the registry
+  eviction: sensitivity_aware      # lru | lfu | rank_aware | sensitivity_aware
+  # Admit at most k distinct adapters into any one decode batch.
+  # k = 1 is full isolation, k = num_adapters is unconstrained.
+  adapter_concurrency_cap: 4
+  # Explicit floors for the two consumers of the paged pool, as fractions of
+  # the pool. Unified paging lets these compete freely; we do not.
+  adapter_cache_floor: 0.25
+  kv_cache_floor: 0.50
+  # Weights for the sensitivity_aware eviction score.
+  eviction_weights:
+    recency: 1.0
+    rank: 0.5
+    sensitivity: 1.5
+
+workload:
+  num_requests: 512
+  arrival_rate_rps: 8.0
+  prompt_tokens_mean: 320
+  output_tokens_mean: 128
+  # Per-adapter SLO targets used for attainment reporting.
+  slo_ttft_s: 1.0
+  slo_tpot_ms: 60.0
+
+simulator:
+  # The analytic cache/queue model used by --simulate. It models the resource
+  # channel only: it has NO quality channel, so IDS is zero by construction.
+  adapter_load_ms_per_mb: 1.8
+  base_forward_ms_per_token: 0.9
+  batch_efficiency: 0.85
